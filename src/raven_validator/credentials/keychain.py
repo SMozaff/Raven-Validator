@@ -1,83 +1,69 @@
-"""OS keychain abstraction — raw secrets live ONLY here.
-
-Wraps `keyring` with a testable backend interface. Never logs or
-returns a secret except to an authorized caller that immediately
-uses it for a single authenticated request.
-"""
-
+"""OS keychain backend; memory backend exists only for tests/injection."""
 from __future__ import annotations
 
 import hashlib
-
-import keyring
-import keyring.errors
+from typing import Protocol
 
 
 class KeychainError(RuntimeError):
-    """Keychain is unavailable or the operation failed."""
+    pass
 
 
-class KeychainBackend:
-    """Thin wrapper over `keyring` with a pluggable in-memory fallback for tests."""
+class SecretBackend(Protocol):
+    def set(self, service: str, username: str, secret: str) -> None: ...
+    def get(self, service: str, username: str) -> str | None: ...
+    def delete(self, service: str, username: str) -> None: ...
 
-    def __init__(self, service_prefix: str = "raven-validator") -> None:
-        self.service_prefix = service_prefix
-        self._memory: dict[tuple[str, str], str] = {}
-        self._use_memory = False
 
-    def enable_memory_backend(self) -> None:
-        """Use in-memory store (tests / CI without a system keychain)."""
-        self._use_memory = True
+class OSKeychain:
+    def _keyring(self):
+        try:
+            import keyring
+            import keyring.errors
+        except ImportError as exc:
+            raise KeychainError("keyring package is unavailable") from exc
+        return keyring
 
-    # -- core ops --
+    def set(self, service: str, username: str, secret: str) -> None:
+        kr = self._keyring()
+        try:
+            kr.set_password(service, username, secret)
+        except Exception as exc:  # backend-specific errors
+            raise KeychainError(str(exc)) from exc
 
-    def store_secret(self, service: str, username: str, secret: str) -> None:
-        if self._use_memory:
-            self._memory[(service, username)] = secret
+    def get(self, service: str, username: str) -> str | None:
+        kr = self._keyring()
+        try:
+            return kr.get_password(service, username)
+        except Exception as exc:
+            raise KeychainError(str(exc)) from exc
+
+    def delete(self, service: str, username: str) -> None:
+        kr = self._keyring()
+        try:
+            kr.delete_password(service, username)
+        except Exception:
+            # Deleting a missing key is idempotent for our UI.
             return
-        try:
-            keyring.set_password(service, username, secret)
-        except keyring.errors.KeyringError as exc:
-            raise KeychainError(str(exc)) from exc
-
-    def retrieve_secret(self, service: str, username: str) -> str | None:
-        if self._use_memory:
-            return self._memory.get((service, username))
-        try:
-            return keyring.get_password(service, username)
-        except keyring.errors.KeyringError as exc:
-            raise KeychainError(str(exc)) from exc
-
-    def delete_secret(self, service: str, username: str) -> None:
-        if self._use_memory:
-            self._memory.pop((service, username), None)
-            return
-        try:
-            keyring.delete_password(service, username)
-        except keyring.errors.PasswordDeleteError:
-            pass
-        except keyring.errors.KeyringError as exc:
-            raise KeychainError(str(exc)) from exc
 
 
-def fingerprint(secret: str) -> str:
-    """Return a masked fingerprint like ••••••••7A2F for GUI display.
+class MemoryKeychain:
+    """Explicit test backend. Production GUI must never instantiate this implicitly."""
+    def __init__(self) -> None:
+        self.data: dict[tuple[str, str], str] = {}
 
-    Derived via SHA-256 so it never leaks the secret, but still
-    lets the user confirm which key is configured.
-    """
+    def set(self, service: str, username: str, secret: str) -> None:
+        self.data[(service, username)] = secret
+
+    def get(self, service: str, username: str) -> str | None:
+        return self.data.get((service, username))
+
+    def delete(self, service: str, username: str) -> None:
+        self.data.pop((service, username), None)
+
+
+def fingerprint(secret: str | None) -> str:
     if not secret:
         return "••••••••----"
     digest = hashlib.sha256(secret.encode()).hexdigest().upper()[:4]
     return f"••••••••{digest}"
-
-
-# Singleton for app use; tests create their own instances.
-_default_backend: KeychainBackend | None = None
-
-
-def get_keychain() -> KeychainBackend:
-    global _default_backend
-    if _default_backend is None:
-        _default_backend = KeychainBackend()
-    return _default_backend

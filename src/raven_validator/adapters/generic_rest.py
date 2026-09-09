@@ -1,179 +1,55 @@
-"""Generic REST adapter.
+"""Conservative generic REST adapter."""
+from __future__ import annotations
 
-Never guesses dangerous request formats or automatically POSTs arbitrary
-payloads to unknown APIs. Allowed to: test the supplied endpoint,
-inspect safe responses, inspect public schemas, and use a custom probe
-template only when explicitly configured by the user.
-"""
-
-import httpx
-
-from raven_validator.adapters.base import DetectionResult
-from raven_validator.probes.base import ProbeContext, ProbeResult
-from raven_validator.security.request_policy import ProbeSafetyLevel
+from raven_validator.adapters.base import AuthorizedContext, DetectionResult, ProbeOutcome, PublicContext
+from raven_validator.security.redaction import redact_text
 
 
 class GenericRESTAdapter:
-    """Safe, non-assumptive adapter for unknown/generic APIs."""
-
     name = "generic-rest"
 
-    async def detect(self, context: ProbeContext) -> DetectionResult:
-        hint = (context.candidate.protocol_hint or "").lower()
-        if hint in ("generic-rest", "generic", "rest"):
-            return DetectionResult(
-                protocol="generic-rest",
-                confidence=0.55,
-                evidence=["Protocol hint explicitly set to generic-rest"],
-                adapter_name=self.name,
-            )
-
-        # Generic is the low-confidence fallback — only claim it when
-        # nothing more specific matched. Caller (protocol_detector)
-        # picks the highest-confidence adapter, so return low here.
+    async def detect(self, ctx: PublicContext) -> DetectionResult:
+        hint = (ctx.candidate.protocol_hint or "").lower()
+        if hint in {"generic-rest", "generic", "rest"}:
+            return DetectionResult("generic-rest", 0.55, ["Explicit generic-rest hint"])
         try:
-            response = await context.client.get(context.base_url)
-        except httpx.HTTPError:
-            return DetectionResult(
-                protocol="unknown",
-                confidence=0.0,
-                evidence=["Generic probe: no connection"],
-                adapter_name=self.name,
-            )
+            r = await ctx.client.get(ctx.base_url)
+        except Exception as exc:
+            return DetectionResult("unknown", 0.0, [f"GET failed: {type(exc).__name__}"])
+        if r.status_code < 500:
+            return DetectionResult("generic-rest", 0.2, [f"Reachable HTTP endpoint: {r.status_code}"])
+        return DetectionResult("unknown", 0.0, [f"Server error: {r.status_code}"])
 
-        if response.status_code < 500:
-            return DetectionResult(
-                protocol="generic-rest",
-                confidence=0.2,
-                evidence=[
-                    f"Generic REST: HTTP {response.status_code} (no specific protocol)"
-                ],
-                adapter_name=self.name,
-            )
-        return DetectionResult(
-            protocol="unknown",
-            confidence=0.0,
-            evidence=["Generic probe: server error, cannot classify"],
-            adapter_name=self.name,
-        )
+    async def public_models(self, ctx: PublicContext) -> ProbeOutcome:
+        return ProbeOutcome("models", False, data={"models": []}, evidence=["No generic model endpoint guessed"])
 
-    async def probe_public(self, context: ProbeContext) -> list[ProbeResult]:
-        """Inspect the supplied endpoint only — safe GET, no payload guessing."""
-        try:
-            response = await context.client.get(context.base_url)
-        except httpx.HTTPError as exc:
-            return [
-                ProbeResult(
-                    probe_name="generic_public",
-                    safety_level=ProbeSafetyLevel.READ_ONLY,
-                    success=False,
-                    endpoint=context.base_url,
-                    method="GET",
-                    error=str(exc),
-                )
-            ]
-        return [
-            ProbeResult(
-                probe_name="generic_public",
-                safety_level=ProbeSafetyLevel.READ_ONLY,
-                success=response.status_code < 400,
-                endpoint=context.base_url,
-                method="GET",
-                http_status=response.status_code,
-                evidence=[f"HTTP {response.status_code}"],
-                data={"excerpt": response.text[:1000], "headers": dict(response.headers)},
-            )
-        ]
+    async def authorized_models(self, ctx: AuthorizedContext) -> ProbeOutcome:
+        return ProbeOutcome("models", False, data={"models": []}, evidence=["No generic model endpoint guessed"])
 
-    async def probe_authorized(
-        self, context: ProbeContext, credential: str
-    ) -> list[ProbeResult]:
-        """Only run a custom template when explicitly configured; otherwise safe GET."""
-        template = context.options.get("custom_template")
-        if not template or not isinstance(template, dict):
-            # Safe fallback: same as public but with auth header supplied.
-            method = context.options.get("custom_method", "GET").upper()
-            if method not in ("GET", "HEAD"):
-                return [
-                    ProbeResult(
-                        probe_name="generic_authorized",
-                        safety_level=ProbeSafetyLevel.CUSTOM_AUTHORIZED,
-                        success=False,
-                        endpoint=context.base_url,
-                        method=method,
-                        error="Custom template required for non-GET authorized requests",
-                    )
-                ]
-            try:
-                headers = {"Authorization": f"Bearer {credential}"}
-                response = await context.client.get(
-                    context.base_url, headers=headers
-                )
-            except httpx.HTTPError as exc:
-                return [
-                    ProbeResult(
-                        probe_name="generic_authorized",
-                        safety_level=ProbeSafetyLevel.CUSTOM_AUTHORIZED,
-                        success=False,
-                        endpoint=context.base_url,
-                        method="GET",
-                        error=str(exc),
-                    )
-                ]
-            return [
-                ProbeResult(
-                    probe_name="generic_authorized",
-                    safety_level=ProbeSafetyLevel.CUSTOM_AUTHORIZED,
-                    success=response.status_code < 400,
-                    endpoint=context.base_url,
-                    method="GET",
-                    http_status=response.status_code,
-                    evidence=[f"HTTP {response.status_code}"],
-                    data={"excerpt": response.text[:1000]},
-                )
-            ]
-
-        # Explicit template path — user has reviewed and configured this.
+    async def generate(self, ctx: AuthorizedContext) -> ProbeOutcome:
+        template = ctx.candidate.custom_probe
+        if not isinstance(template, dict):
+            return ProbeOutcome("generation", False, data={"status": "UNSUPPORTED"}, evidence=["No explicit custom probe template configured"])
         method = str(template.get("method", "GET")).upper()
-        path = str(template.get("path", ""))
-        headers = dict(template.get("headers", {}))
-        body = template.get("body")
-        # Resolve credential placeholder.
-        for key, value in list(headers.items()):
-            if isinstance(value, str) and "{{credential}}" in value:
-                headers[key] = value.replace("{{credential}}", credential)
-        url = f"{context.base_url.rstrip('/')}{path}" if path else context.base_url
+        url = str(template.get("url") or ctx.base_url)
+        if method not in {"GET", "HEAD", "POST", "PUT", "PATCH"}:
+            return ProbeOutcome("generation", False, error="Unsupported custom method")
+        headers = dict(ctx.auth_headers)
+        headers.update({str(k): str(v) for k,v in dict(template.get("headers") or {}).items()})
         try:
-            if method in ("POST", "PUT", "PATCH"):
-                response = await context.client.request(
-                    method, url, json=body, headers=headers
-                )
-            else:
-                response = await context.client.request(method, url, headers=headers)
-        except httpx.HTTPError as exc:
-            return [
-                ProbeResult(
-                    probe_name="generic_authorized",
-                    safety_level=ProbeSafetyLevel.CUSTOM_AUTHORIZED,
-                    success=False,
-                    endpoint=url,
-                    method=method,
-                    error=str(exc),
-                )
-            ]
-        return [
-            ProbeResult(
-                probe_name="generic_authorized",
-                safety_level=ProbeSafetyLevel.CUSTOM_AUTHORIZED,
-                success=response.status_code < 400,
-                endpoint=url,
-                method=method,
-                http_status=response.status_code,
-                data={"excerpt": response.text[:1000]},
-            )
-        ]
+            r = await ctx.client.request(method, url, headers=headers, json=template.get("body") if method in {"POST","PUT","PATCH"} else None)
+        except Exception as exc:
+            return ProbeOutcome("generation", False, error=f"{type(exc).__name__}: {exc}")
+        return ProbeOutcome("generation", r.status_code < 400, r.status_code, data={"excerpt": redact_text(r.text, 500), "headers": dict(r.headers)})
 
-    def normalize_error(self, response: object) -> str:
-        if isinstance(response, httpx.Response):
-            return response.text[:500]
-        return str(response)
+    async def stream(self, ctx: AuthorizedContext) -> ProbeOutcome:
+        return ProbeOutcome("streaming", False, data={"status": "UNSUPPORTED"})
+
+    async def quota(self, ctx: AuthorizedContext) -> ProbeOutcome:
+        if not ctx.candidate.quota_endpoint:
+            return ProbeOutcome("quota", False, data={"status": "UNSUPPORTED", "known": False, "reason": "No documented quota endpoint configured"})
+        try:
+            r = await ctx.client.get(ctx.candidate.quota_endpoint, headers=ctx.auth_headers)
+        except Exception as exc:
+            return ProbeOutcome("quota", False, error=f"{type(exc).__name__}: {exc}")
+        return ProbeOutcome("quota", False, r.status_code, data={"status": "UNKNOWN", "known": False, "reason": "Generic quota response is not interpreted without provider schema"})

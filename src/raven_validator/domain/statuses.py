@@ -1,16 +1,7 @@
-"""Central validation status taxonomy.
-
-Use precise statuses — never collapse distinct failures into a generic
-"failed". A more specific status must be preferred whenever evidence
-supports it.
-"""
-
 from enum import StrEnum
 
 
 class ValidationStatus(StrEnum):
-    """Normalized overall status of an API validation run."""
-
     WORKING = "WORKING"
     REACHABLE_AUTH_REQUIRED = "REACHABLE_AUTH_REQUIRED"
     REACHABLE_UNSUPPORTED = "REACHABLE_UNSUPPORTED"

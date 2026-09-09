@@ -1,56 +1,32 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "raven-validator"
-version = "0.1.0"
-description = "Cross-platform desktop application for validating AI API endpoints"
-readme = "README.md"
+version = "0.2.0"
+description = "Desktop validator for AI API endpoints with safe public and authorized probes"
 requires-python = ">=3.12"
-license = { text = "MIT" }
-authors = [{ name = "Soheil Mozaffari" }]
 dependencies = [
-    "PySide6>=6.6.0",
-    "httpx>=0.25.0",
-    "SQLAlchemy>=2.0.0",
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
-    "python-dateutil>=2.8.0",
-    "tenacity>=8.0.0",
-    "keyring>=24.0.0",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "SQLAlchemy>=2,<3",
+  "keyring>=25,<26",
+  "PySide6>=6.8,<7",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "ruff>=0.1.0",
-]
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.9,<1"]
+packaging = ["pyinstaller>=6,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-markers = [
-    "integration: marks tests that require live endpoints (deselect with '-m \"not integration\"')",
-]
+pythonpath = ["src"]
+addopts = "-q"
 
 [tool.ruff]
-line-length = 100
 target-version = "py312"
-src = ["src"]
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["E501"]
-"src/raven_validator/database/*.py" = ["E501"]
-"src/raven_validator/gui/*.py" = ["E501", "SIM105", "SIM108", "F541"]
-"src/raven_validator/services/*.py" = ["E501", "SIM105"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["raven_validator"]
+line-length = 100

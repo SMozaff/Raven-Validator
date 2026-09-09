@@ -1,28 +1,21 @@
-"""Normalized validation result model."""
+from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
-
 from pydantic import BaseModel, Field
-
-from raven_validator.domain.capabilities import CapabilityResult
 from raven_validator.domain.statuses import ValidationStatus
-from raven_validator.utils.dates import utc_now
 
 
-class RateLimitResult(BaseModel):
-    """Normalized rate-limit information."""
-
+class RateLimitInfo(BaseModel):
     known: bool = False
     limit: int | None = None
     remaining: int | None = None
-    reset_at: datetime | None = None
-    source: str | None = None
+    reset_at: str | None = None
+    retry_after: float | None = None
 
 
-class QuotaResult(BaseModel):
-    """Normalized quota/credit information."""
-
+class QuotaInfo(BaseModel):
+    status: str = "NOT_TESTED"
     known: bool = False
     balance: float | None = None
     unit: str | None = None
@@ -30,41 +23,30 @@ class QuotaResult(BaseModel):
 
 
 class ValidationError(BaseModel):
-    """Structured validation error."""
-
-    error_type: str
+    probe: str
     message: str
-    details: str | None = None
+    http_status: int | None = None
 
 
 class ValidationResult(BaseModel):
-    """Evidence-based normalized result of validating one candidate."""
-
     candidate_id: UUID
     run_id: UUID
-
-    reachable: bool | None = None
+    base_url: str
     overall_status: ValidationStatus = ValidationStatus.UNKNOWN
-
-    detected_protocol: str | None = None
+    reachable: bool | None = None
+    detected_protocol: str = "unknown"
     protocol_confidence: float = 0.0
-
     auth_required: bool | None = None
     auth_scheme: str | None = None
-
     credential_configured: bool = False
     credential_used: bool = False
-
-    capabilities: CapabilityResult = Field(default_factory=CapabilityResult)
-
+    authorized_test_succeeded: bool = False
     models: list[str] = Field(default_factory=list)
-
+    capabilities: dict[str, bool] = Field(default_factory=dict)
     latency_ms: float | None = None
-
-    rate_limit: RateLimitResult = Field(default_factory=RateLimitResult)
-    quota: QuotaResult = Field(default_factory=QuotaResult)
-
+    rate_limit: RateLimitInfo = Field(default_factory=RateLimitInfo)
+    quota: QuotaInfo = Field(default_factory=QuotaInfo)
+    request_count: int = 0
+    evidence: list[str] = Field(default_factory=list)
     errors: list[ValidationError] = Field(default_factory=list)
-
-    confidence: float = 0.0
-    tested_at: datetime = Field(default_factory=utc_now)
+    tested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

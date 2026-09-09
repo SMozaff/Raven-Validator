@@ -1,347 +1,304 @@
-"""Validation service — batch orchestration, persistence, progressive events."""
-
+"""Safe batch validation orchestration with protocol-specific authorized testing."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+import re
+import time
 from dataclasses import dataclass
+from typing import AsyncGenerator, Callable
 from uuid import UUID, uuid4
 
 import httpx
 
+from raven_validator.adapters.base import AuthorizedContext, ProbeOutcome, PublicContext
 from raven_validator.config.settings import AppSettings
-from raven_validator.core.capability_detector import detect_capabilities
+from raven_validator.core.http_client import BudgetedSafeClient
 from raven_validator.core.protocol_detector import detect_protocol
-from raven_validator.core.result_normalizer import normalize_probe_results
-from raven_validator.core.validator import ProbeRunner
-from raven_validator.database.database import Database
-from raven_validator.database.repository import Repository
+from raven_validator.core.status_mapper import transport_status
 from raven_validator.domain.candidates import APICandidate
-from raven_validator.domain.results import ValidationResult
+from raven_validator.domain.credentials import CredentialProfile
+from raven_validator.domain.results import QuotaInfo, RateLimitInfo, ValidationError, ValidationResult
 from raven_validator.domain.statuses import ValidationStatus
-from raven_validator.probes.auth import AuthProbe
-from raven_validator.probes.base import Probe, ProbeContext, ProbeResult
-from raven_validator.probes.generation import GenerationProbe
-from raven_validator.probes.models import ModelsProbe
-from raven_validator.probes.openapi import OpenAPISchemaProbe
-from raven_validator.probes.quota import QuotaProbe
-from raven_validator.probes.rate_limits import RateLimitProbe
-from raven_validator.probes.reachability import ReachabilityProbe
-from raven_validator.probes.streaming import StreamingProbe
-from raven_validator.security.request_policy import ProbeSafetyLevel, RequestPolicy
+from raven_validator.security.network_policy import NetworkPolicy, UnsafeNetworkTarget
+from raven_validator.security.redaction import redact_text
+from raven_validator.security.request_policy import ProbeSafetyLevel, RequestBudgetExceeded, RequestPolicy
+
+CredentialResolver = Callable[[APICandidate], tuple[CredentialProfile, str] | None]
 
 
-@dataclass
+@dataclass(frozen=True)
 class ValidationOptions:
-    mode: str = "standard"  # quick | standard | authorized | custom
+    mode: str = "standard"  # quick | standard | authorized
     test_streaming: bool = False
     check_quota: bool = False
+    inspect_rate_limits: bool = True
     model: str | None = None
-    headers: dict[str, str] | None = None
+    timeout_override: float | None = None
 
 
 @dataclass
 class BatchEvent:
-    kind: str  # run_started | candidate_started | probe_finished | candidate_finished | progress | run_finished | run_cancelled
+    kind: str
     candidate_id: UUID | None = None
-    run_id: UUID | None = None
-    probe_name: str | None = None
-    status: str | None = None
-    progress: tuple[int, int] | None = None  # (done, total)
     result: ValidationResult | None = None
+    progress: tuple[int, int] | None = None
+    message: str | None = None
+
+
+def _auth_from_response(response: httpx.Response) -> tuple[bool, str | None, list[str]]:
+    if response.status_code not in {401, 403}:
+        return False, None, [f"HTTP {response.status_code}: no auth challenge at base URL"]
+    text = response.text.lower()[:2000]
+    www = response.headers.get("www-authenticate", "").lower()
+    if "bearer" in www or "bearer" in text or "authorization" in text:
+        return True, "bearer", [f"HTTP {response.status_code}", "Bearer/Authorization signal"]
+    if "x-api-key" in text or "api key" in text or "apikey" in text:
+        return True, "api-key-header", [f"HTTP {response.status_code}", "API-key signal"]
+    if "basic" in www or "basic" in text:
+        return True, "basic", [f"HTTP {response.status_code}", "Basic auth signal"]
+    return True, "unknown", [f"HTTP {response.status_code}: authentication required"]
+
+
+def _parse_rate_limit(headers: dict[str, str]) -> RateLimitInfo:
+    lower = {k.lower(): v for k, v in headers.items()}
+    def as_int(*keys: str) -> int | None:
+        for key in keys:
+            try:
+                return int(float(lower[key]))
+            except (KeyError, ValueError):
+                continue
+        return None
+    retry: float | None = None
+    try:
+        retry = float(lower["retry-after"])
+    except (KeyError, ValueError):
+        pass
+    limit = as_int("ratelimit-limit", "x-ratelimit-limit")
+    remaining = as_int("ratelimit-remaining", "x-ratelimit-remaining")
+    return RateLimitInfo(
+        known=limit is not None or remaining is not None or retry is not None,
+        limit=limit,
+        remaining=remaining,
+        reset_at=lower.get("ratelimit-reset") or lower.get("x-ratelimit-reset"),
+        retry_after=retry,
+    )
+
+
+def _explicit_insufficient(outcome: ProbeOutcome) -> bool:
+    if outcome.http_status != 429:
+        return False
+    text = str(outcome.data.get("excerpt", "")).lower()
+    # Narrow provider-style signals only; generic "quota" is not sufficient.
+    return bool(re.search(r"insufficient[_ -]?(quota|credit|credits)|billing[_ -]?hard[_ -]?limit", text))
 
 
 class ValidationService:
-    """Orchestrates validation for batches of candidates."""
-
     def __init__(
         self,
         settings: AppSettings,
-        database: Database,
-        credential_store: dict[UUID, str] | None = None,
+        credential_resolver: CredentialResolver | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        resolve_dns: bool = True,
     ) -> None:
         self.settings = settings
-        self.database = database
-        self.credential_store = credential_store or {}
-        self._cancelled = False
-        self._runner = ProbeRunner(settings)
+        self.credential_resolver = credential_resolver
+        self.transport = transport
+        self.resolve_dns = resolve_dns
+        self._cancel_event = asyncio.Event()
 
     def cancel(self) -> None:
-        self._cancelled = True
+        self._cancel_event.set()
 
     def reset_cancel(self) -> None:
-        self._cancelled = False
+        self._cancel_event = asyncio.Event()
 
-    def _probes_for_mode(self, options: ValidationOptions, has_credential: bool) -> list[Probe]:
-        probes: list[Probe] = [ReachabilityProbe(), AuthProbe()]
-        if options.mode == "quick":
-            return probes
-        probes.extend([ModelsProbe(), RateLimitProbe(), OpenAPISchemaProbe()])
-        if options.mode in ("authorized", "custom") and has_credential:
-            probes.append(GenerationProbe())
-            if options.test_streaming:
-                probes.append(StreamingProbe())
-            if options.check_quota:
-                probes.append(QuotaProbe())
-        return probes
-
-    def _policy_for(self, options: ValidationOptions, has_credential: bool, profile_id: str | None) -> RequestPolicy:
-        # Quick/Standard are READ_ONLY; Authorized elevates to MINIMAL_GENERATION.
-        ceiling = ProbeSafetyLevel.READ_ONLY
-        if options.mode in ("authorized", "custom") and has_credential:
-            if options.check_quota:
-                ceiling = ProbeSafetyLevel.CUSTOM_AUTHORIZED
-            else:
-                ceiling = ProbeSafetyLevel.MINIMAL_GENERATION
-        policy = RequestPolicy(
-            max_requests_per_api=self.settings.max_requests_per_api,
-            max_concurrency=self.settings.max_concurrency,
-            max_safety_level=ceiling,
-        )
-        if has_credential and profile_id:
-            policy.authorize_credential(profile_id)
-        return policy
-
-    async def validate_one(
-        self,
-        candidate: APICandidate,
-        options: ValidationOptions,
-        client: httpx.AsyncClient | None = None,
-        _transport: httpx.BaseTransport | None = None,
-    ) -> ValidationResult:
+    async def validate_one(self, candidate: APICandidate, options: ValidationOptions) -> ValidationResult:
         run_id = uuid4()
-        has_credential = candidate.credential_profile_id is not None and candidate.credential_profile_id in self.credential_store
-        credential = self.credential_store.get(candidate.credential_profile_id) if candidate.credential_profile_id else None
-        profile_id = str(candidate.credential_profile_id) if candidate.credential_profile_id else None
+        result = ValidationResult(candidate_id=candidate.id, run_id=run_id, base_url=str(candidate.base_url))
+        ceiling = ProbeSafetyLevel.MINIMAL_GENERATION if options.mode == "authorized" else ProbeSafetyLevel.READ_ONLY
+        if options.check_quota and options.mode == "authorized":
+            ceiling = ProbeSafetyLevel.CUSTOM_AUTHORIZED
+        policy = RequestPolicy(self.settings.max_requests_per_api, ceiling)
+        network = NetworkPolicy(self.settings.allow_private_networks, resolve_dns=self.resolve_dns)
+        timeout_value = options.timeout_override or max(self.settings.connect_timeout, self.settings.read_timeout)
+        timeout = httpx.Timeout(timeout_value)
 
-        probes = self._probes_for_mode(options, has_credential)
-        policy = self._policy_for(options, has_credential, profile_id)
+        async with httpx.AsyncClient(timeout=timeout, transport=self.transport, headers={"User-Agent": "Raven-Validator/0.2"}) as raw:
+            client = BudgetedSafeClient(raw, policy, network)
+            public = PublicContext(candidate, client, str(candidate.base_url).rstrip("/"))
 
-        # Create run row.
-        with self.database.session() as sess:
-            repo = Repository(sess)
-            repo.save_candidate(candidate)
-            repo.create_run(candidate.id, mode=options.mode, run_id=run_id)
+            # One public base request supplies both reachability and auth evidence.
+            started = time.perf_counter()
+            try:
+                base_response = await client.get(public.base_url)
+            except (UnsafeNetworkTarget, RequestBudgetExceeded, httpx.HTTPError, ValueError) as exc:
+                message = f"{type(exc).__name__}: {exc}"
+                result.overall_status = transport_status(message)
+                result.reachable = False
+                result.errors.append(ValidationError(probe="reachability", message=redact_text(message, 500)))
+                result.request_count = policy.requests_made
+                return result
+            result.latency_ms = (time.perf_counter() - started) * 1000
+            result.reachable = base_response.status_code < 500
+            auth_required, auth_scheme, auth_evidence = _auth_from_response(base_response)
+            result.auth_required = auth_required
+            result.auth_scheme = auth_scheme
+            result.evidence.extend([f"Base HTTP {base_response.status_code}", *auth_evidence])
+            if options.inspect_rate_limits:
+                result.rate_limit = _parse_rate_limit(dict(base_response.headers))
 
-        # Build httpx client (or use injected).
-        own_client = client is None
-        if own_client:
-            timeout = httpx.Timeout(
-                connect=self.settings.connect_timeout,
-                read=self.settings.read_timeout,
-                write=self.settings.read_timeout,
-                pool=self.settings.connect_timeout,
-            )
-            kwargs: dict[str, object] = {
-                "timeout": timeout,
-                "max_redirects": 5,
-                "follow_redirects": True,
-                "headers": {"User-Agent": "Raven-Validator/0.1"},
-            }
-            if _transport is not None:
-                kwargs["transport"] = _transport
-            client = httpx.AsyncClient(**kwargs)  # type: ignore[arg-type]
+            if self._cancel_event.is_set():
+                result.overall_status = ValidationStatus.CANCELLED
+                result.request_count = policy.requests_made
+                return result
 
-        probe_results: list[ProbeResult] = []
-        protocol_name = "unknown"
-        protocol_conf = 0.0
-        try:
-            # Protocol detection (best-effort, needs a client context).
-            from raven_validator.utils.urls import normalize_url
-            base_url = normalize_url(str(candidate.base_url))
-            ctx = ProbeContext(
-                candidate=candidate,
-                client=client,
-                base_url=base_url,
-                credential=credential,
-                options={"model": options.model, "headers": options.headers} if options.model or options.headers else {},
-            )
-            detection = await detect_protocol(ctx)
-            protocol_name = detection.protocol
-            protocol_conf = detection.confidence
+            # Protocol detection gets a credential-free context and uses the same budgeted client.
+            try:
+                detection, adapter = await detect_protocol(public, bool(result.reachable))
+            except (UnsafeNetworkTarget, RequestBudgetExceeded, httpx.HTTPError) as exc:
+                result.errors.append(ValidationError(probe="protocol", message=redact_text(str(exc), 500)))
+                detection = None
+                from raven_validator.adapters.generic_rest import GenericRESTAdapter
+                adapter = GenericRESTAdapter()
+            if detection:
+                result.detected_protocol = detection.protocol
+                result.protocol_confidence = detection.confidence
+                result.evidence.extend(detection.evidence)
 
-            # Run probe sequence.
-            for probe in probes:
-                if self._cancelled:
-                    break
-                if not policy.check_probe_allowed(probe.safety_level):
-                    continue
-                if not policy.check_budget():
-                    break
-                ctx_probe = ProbeContext(
-                    candidate=candidate,
-                    client=client,
-                    base_url=base_url,
-                    credential=credential,
-                    options={"model": options.model, "headers": options.headers} if options.model or options.headers else {},
-                )
-                # For generation/streaming/quota, propagate credential in options too if needed.
-                result = await self._runner.run(probe, ctx_probe, policy)
-                probe_results.append(result)
-        finally:
-            if own_client:
-                await client.aclose()  # type: ignore[union-attr]
-
-        # Capabilities from probe results.
-        caps = detect_capabilities(protocol_name, probe_results)
-
-        # Normalize with extended fields (models, rate-limit, quota).
-        # Use existing normalizer then patch extended fields.
-        result = normalize_probe_results(
-            candidate.id,
-            run_id,
-            probe_results,
-            credential_configured=has_credential,
-            credential_used=has_credential and any(p.probe_name in ("generation", "streaming", "quota") for p in probe_results),
-        )
-        result.detected_protocol = protocol_name
-        result.protocol_confidence = protocol_conf
-        result.capabilities = caps
-        # Override status if cancelled.
-        if self._cancelled:
-            result.overall_status = ValidationStatus.CANCELLED
-
-        # Patch models / rate-limit / quota from probe data.
-        for pr in probe_results:
-            if pr.probe_name == "models" and pr.success:
-                models = pr.data.get("models")
-                if isinstance(models, list):
-                    result.models = [str(m) for m in models]
-            if pr.probe_name == "rate_limits":
-                rl = pr.data
-                result.rate_limit.known = bool(rl.get("known"))
-                result.rate_limit.limit = rl.get("limit") if isinstance(rl.get("limit"), int) else None  # type: ignore[assignment]
-                result.rate_limit.remaining = rl.get("remaining") if isinstance(rl.get("remaining"), int) else None  # type: ignore[assignment]
-                result.rate_limit.source = rl.get("source") if isinstance(rl.get("source"), str) else None  # type: ignore[assignment]
-            if pr.probe_name == "quota":
-                q = pr.data
-                result.quota.known = bool(q.get("known"))
-                status = q.get("status")
-                if status == "INSUFFICIENT":
-                    result.overall_status = ValidationStatus.INSUFFICIENT_CREDITS
-                bal = q.get("balance")
-                if isinstance(bal, (int, float)):
-                    result.quota.balance = float(bal)
-                unit = q.get("unit")
-                if isinstance(unit, str):
-                    result.quota.unit = unit
-                reason = q.get("reason")
-                if isinstance(reason, str):
-                    result.quota.reason = reason
-
-        # Persist.
-        with self.database.session() as sess:
-            repo = Repository(sess)
-            run = repo.get_run(run_id)
-            if run is not None:
-                run.status = result.overall_status.value
-                run.reachable = result.reachable
-                run.detected_protocol = result.detected_protocol
-                run.confidence = result.confidence
-                from datetime import UTC, datetime
-
-                run.completed_at = datetime.now(UTC)
-                run.request_count = len(probe_results)
-                run.error_count = len(result.errors)
-            # Snapshots.
-            repo.save_capability_snapshot(
-                run_id,
-                models=caps.models,
-                chat_completions=caps.chat_completions,
-                responses=caps.responses,
-                streaming=caps.streaming,
-                embeddings=caps.embeddings,
-                images=caps.images,
-                audio=caps.audio,
-            )
-            if result.models:
-                repo.save_model_snapshots(run_id, result.models)
-            repo.save_rate_limit_snapshot(
-                run_id,
-                known=result.rate_limit.known,
-                limit=result.rate_limit.limit,
-                remaining=result.rate_limit.remaining,
-                reset_at=result.rate_limit.reset_at,
-                source=result.rate_limit.source,
-            )
-            repo.save_quota_snapshot(
-                run_id,
-                status="KNOWN" if result.quota.known else ("INSUFFICIENT" if result.overall_status == ValidationStatus.INSUFFICIENT_CREDITS else "UNKNOWN"),
-                known=result.quota.known,
-                balance=result.quota.balance,
-                unit=result.quota.unit,
-                reason=result.quota.reason,
-            )
-            for pr in probe_results:
-                repo.save_probe_result(
-                    run_id,
-                    probe_type=pr.probe_name,
-                    endpoint=pr.endpoint,
-                    method=pr.method,
-                    status=pr.probe_name,
-                    http_status=pr.http_status,
-                    latency_ms=pr.latency_ms,
-                    excerpt=str(pr.data.get("excerpt", "")) if pr.data else pr.error,
-                )
-                if pr.error:
-                    repo.save_error(run_id, error_type=pr.probe_name, message=pr.error)
-
-        return result
-
-    async def validate_batch(
-        self,
-        candidates: list[APICandidate],
-        options: ValidationOptions,
-        _transport: httpx.BaseTransport | None = None,
-    ) -> AsyncGenerator[BatchEvent, None]:
-        self._cancelled = False
-        total = len(candidates)
-        yield BatchEvent(kind="run_started", progress=(0, total))
-        sem = asyncio.Semaphore(self.settings.max_concurrency)
-        completed = 0
-
-        async def _one(cand: APICandidate) -> BatchEvent:
-            if self._cancelled:
-                return BatchEvent(kind="candidate_finished", candidate_id=cand.id, status="CANCELLED", progress=(0, total))
-            async with sem:
-                if self._cancelled:
-                    return BatchEvent(kind="candidate_finished", candidate_id=cand.id, status="CANCELLED", progress=(0, total))
-                result = await self.validate_one(cand, options, _transport=_transport)
-                return BatchEvent(
-                    kind="candidate_finished",
-                    candidate_id=cand.id,
-                    run_id=result.run_id,
-                    status=result.overall_status.value,
-                    result=result,
-                )
-
-        # Schedule tasks respecting cancel.
-        tasks: list[asyncio.Task[BatchEvent]] = []
-        for cand in candidates:
-            if self._cancelled:
-                break
-            yield BatchEvent(kind="candidate_started", candidate_id=cand.id)
-            tasks.append(asyncio.create_task(_one(cand)))
-
-        pending: set[asyncio.Task[BatchEvent]] = set(tasks)
-        while pending:
-            if self._cancelled:
-                for t in list(pending):
-                    if not t.done():
-                        t.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-                yield BatchEvent(kind="run_cancelled", progress=(completed, total))
-                break
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for t in done:
+            outcomes: list[ProbeOutcome] = []
+            # Standard adds a public model probe. It cannot access any secret.
+            if options.mode in {"standard", "authorized"} and not self._cancel_event.is_set():
                 try:
-                    event = t.result()
+                    model_out = await adapter.public_models(public)
+                    outcomes.append(model_out)
+                except RequestBudgetExceeded as exc:
+                    result.errors.append(ValidationError(probe="models", message=str(exc)))
+
+            credential: tuple[CredentialProfile, str] | None = None
+            if options.mode == "authorized" and self.credential_resolver is not None:
+                credential = self.credential_resolver(candidate)
+            result.credential_configured = credential is not None
+
+            # Only now is a secret introduced, after explicit Authorized mode.
+            if options.mode == "authorized" and credential is not None and not self._cancel_event.is_set():
+                profile, secret = credential
+                from raven_validator.credentials.manager import CredentialManager
+                auth_headers = CredentialManager.build_headers(profile, secret)
+                # Anthropic adapters require x-api-key; if user picked generic bearer but
+                # protocol is Anthropic, use the protocol-correct header without changing storage.
+                if result.detected_protocol == "anthropic-compatible" and profile.auth_type.value == "bearer":
+                    auth_headers = {"x-api-key": secret}
+                authorized = AuthorizedContext(candidate, client, public.base_url, auth_headers, options.model)
+                result.credential_used = True
+
+                try:
+                    auth_models = await adapter.authorized_models(authorized)
+                    outcomes.append(auth_models)
+                except RequestBudgetExceeded:
+                    pass
+                if not self._cancel_event.is_set():
+                    try:
+                        generation = await adapter.generate(authorized)
+                        outcomes.append(generation)
+                        result.authorized_test_succeeded = generation.success
+                    except RequestBudgetExceeded as exc:
+                        result.errors.append(ValidationError(probe="generation", message=str(exc)))
+                if options.test_streaming and not self._cancel_event.is_set():
+                    try:
+                        outcomes.append(await adapter.stream(authorized))
+                    except RequestBudgetExceeded:
+                        pass
+                if options.check_quota and not self._cancel_event.is_set():
+                    try:
+                        outcomes.append(await adapter.quota(authorized))
+                    except RequestBudgetExceeded:
+                        result.quota = QuotaInfo(status="UNKNOWN", known=False, reason="Request budget exhausted")
+
+            # Consume normalized outcomes.
+            for out in outcomes:
+                if out.name == "models" and out.success:
+                    models = out.data.get("models")
+                    if isinstance(models, list):
+                        result.models = list(dict.fromkeys(str(x) for x in models))
+                        result.capabilities["models"] = True
+                elif out.name == "generation":
+                    result.capabilities["generation"] = out.success
+                elif out.name == "streaming":
+                    result.capabilities["streaming"] = out.success
+                elif out.name == "quota":
+                    q = out.data
+                    result.quota = QuotaInfo(
+                        status=str(q.get("status", "UNKNOWN")), known=bool(q.get("known")),
+                        balance=float(q["balance"]) if isinstance(q.get("balance"), (int, float)) else None,
+                        unit=str(q["unit"]) if q.get("unit") is not None else None,
+                        reason=str(q["reason"]) if q.get("reason") is not None else None,
+                    )
+                if options.inspect_rate_limits and isinstance(out.data.get("headers"), dict):
+                    parsed = _parse_rate_limit({str(k): str(v) for k,v in out.data["headers"].items()})
+                    if parsed.known:
+                        result.rate_limit = parsed
+                result.evidence.extend(out.evidence)
+                if out.error:
+                    result.errors.append(ValidationError(probe=out.name, message=redact_text(out.error, 500), http_status=out.http_status))
+
+            # Status precedence: successful authorized functional test means WORKING
+            # even though auth_required remains True as an independent fact.
+            generation = next((o for o in outcomes if o.name == "generation"), None)
+            if self._cancel_event.is_set():
+                result.overall_status = ValidationStatus.CANCELLED
+            elif generation and generation.success:
+                result.overall_status = ValidationStatus.WORKING
+            elif generation and _explicit_insufficient(generation):
+                result.overall_status = ValidationStatus.INSUFFICIENT_CREDITS
+            elif generation and generation.http_status == 429:
+                result.overall_status = ValidationStatus.RATE_LIMITED
+            elif generation and generation.http_status in {401, 403}:
+                result.overall_status = ValidationStatus.INVALID_CREDENTIAL
+            elif result.auth_required:
+                result.overall_status = ValidationStatus.REACHABLE_AUTH_REQUIRED
+            elif result.reachable:
+                result.overall_status = ValidationStatus.WORKING if result.detected_protocol != "unknown" else ValidationStatus.REACHABLE_UNSUPPORTED
+            else:
+                result.overall_status = ValidationStatus.SERVER_ERROR
+            result.request_count = policy.requests_made
+            return result
+
+    async def validate_batch(self, candidates: list[APICandidate], options: ValidationOptions) -> AsyncGenerator[BatchEvent, None]:
+        self.reset_cancel()
+        total = len(candidates)
+        done_count = 0
+        yield BatchEvent("run_started", progress=(0, total))
+        sem = asyncio.Semaphore(self.settings.max_concurrency)
+
+        async def one(c: APICandidate) -> ValidationResult:
+            async with sem:
+                if self._cancel_event.is_set():
+                    return ValidationResult(candidate_id=c.id, run_id=uuid4(), base_url=str(c.base_url), overall_status=ValidationStatus.CANCELLED)
+                return await self.validate_one(c, options)
+
+        tasks = {asyncio.create_task(one(c)): c for c in candidates}
+        pending = set(tasks)
+        while pending:
+            if self._cancel_event.is_set():
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                yield BatchEvent("run_cancelled", progress=(done_count, total))
+                return  # terminal event is mutually exclusive with run_finished
+            finished, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in finished:
+                c = tasks[task]
+                try:
+                    result = task.result()
                 except asyncio.CancelledError:
                     continue
-                completed += 1
-                event.progress = (completed, total)
-                yield BatchEvent(kind="progress", progress=(completed, total))
-                yield event
-
-        if not self._cancelled or completed < total:
-            yield BatchEvent(kind="run_finished", progress=(completed, total))
+                except Exception as exc:
+                    result = ValidationResult(
+                        candidate_id=c.id, run_id=uuid4(), base_url=str(c.base_url),
+                        overall_status=ValidationStatus.UNKNOWN,
+                        errors=[ValidationError(probe="batch", message=redact_text(f"{type(exc).__name__}: {exc}", 500))],
+                    )
+                done_count += 1
+                yield BatchEvent("candidate_finished", candidate_id=c.id, result=result, progress=(done_count, total))
+        yield BatchEvent("run_finished", progress=(done_count, total))
