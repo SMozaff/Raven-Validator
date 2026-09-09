@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 5 — Functional Probes (complete, pending commit)
+Milestone 6 — Persistence (complete, pending commit)
 
 ## Completed
 
@@ -11,8 +11,10 @@ Milestone 5 — Functional Probes (complete, pending commit)
 - M2 Networking & Public Probes (committed 1ce51be)
 - M3 Protocol Adapters (committed ef810ed)
 - M4 Authorized Credentials (committed 366835a)
-- M5.1-5.2 Functional probes (models dedupe/snapshot, minimal generation 1-req/3-tokens, streaming first-chunk, rate-limit header parse, quota optional UNKNOWN/INSUFFICIENT)
-- M5.3 Verification (ruff clean, 121/121 pytest pass; smoke: authorized generation + streaming OK, unknown quota=UNKNOWN)
+- M5 Functional Probes (committed 1b7832d)
+- M6.1 SQLAlchemy ORM (9 tables: api_candidates, validation_runs, probe_results, capability/model/rate_limit/quota_snapshots, credential_profiles, validation_errors; auto-create on first run)
+- M6.2 Database + Repository (engine, session context, candidate/run/probe/snapshot/error/credential-profile CRUD with redaction, save_validation_result convenience)
+- M6.3 Verification (ruff clean, 127/127 pytest pass; no secret in DB; history persists across restarts)
 
 ## In Progress
 
@@ -20,7 +22,7 @@ Milestone 5 — Functional Probes (complete, pending commit)
 
 ## Next
 
-- Milestone 6 — Persistence
+- Milestone 7 — GUI Shell
 
 ## Files Changed
 
@@ -42,6 +44,7 @@ Milestone 5 — Functional Probes (complete, pending commit)
 - `pytest` (M3) → 87 passed (added protocol/openai/anthropic adapter tests)
 - `pytest` (M4) → 104 passed (added auth_detector + credential_security: no secret in SQLite/logs/export)
 - `pytest` (M5) → 121 passed (added models/generation/streaming/rate_limit/quota probes)
+- `pytest` (M6) → 127 passed (schema, candidate/run/probe/snapshot/credential CRUD; no secret in DB; persistence across restarts)
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 - M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
 

@@ -46,5 +46,9 @@ src = ["src"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E501"]
+"src/raven_validator/database/*.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["raven_validator"]
