@@ -2,7 +2,23 @@
 
 ## Current Milestone
 
-Milestone 10 — Polish & Release Candidate (complete, pending commit)
+Packaging — PyInstaller (complete, verified on Linux)
+
+## Completed
+
+- M0 Bootstrap (committed 94805ba)
+- M1 Domain & Security Foundation (committed e6bf009)
+- M2 Networking & Public Probes (committed 1ce51be)
+- M3 Protocol Adapters (committed ef810ed)
+- M4 Authorized Credentials (committed 366835a)
+- M5 Functional Probes (committed 1b7832d)
+- M6 Persistence (committed b1661a5)
+- M7 GUI Shell (committed c003846)
+- M8 End-to-End Validation (committed 6eb46f9)
+- M9 Import / Export (committed 4156e8e)
+- M10 Polish & Release Candidate (committed 8c175a4)
+- Packaging — PyInstaller 6.22.2: `pyinstaller --windowed --name Raven-Validator --paths src --collect-all pydantic/pydantic-settings/sqlalchemy/httpx/tenacity/keyring --hidden-import raven_validator app.py` → `dist/Raven-Validator/` (directory, ELF 64-bit, 12 MB binary + 51 MB _internal, 221 MB total, PySide6 + all deps); tested `QT_QPA_PLATFORM=offscreen dist/Raven-Validator/Raven-Validator` (propagateSizeHints warning only, GUI up); one-file variant documented; Windows `.exe` / macOS `.app` / Linux AppImage instructions + `Raven-Validator.spec` checked in
+- Packaging verification: `ruff` clean, `pytest` 138 passed, `python app.py` still works via `python app.py`
 
 ## Completed
 
@@ -26,6 +42,7 @@ Milestone 10 — Polish & Release Candidate (complete, pending commit)
 
 ## Next
 
+- Distribute: Windows build on Windows host (`dist\Raven-Validator\Raven-Validator.exe`), macOS build (`dist/Raven-Validator.app` + DMG), Linux AppImage via `linuxdeploy`; `build/` and `dist/` remain gitignored
 - V1.1 (Gemini/Ollama/HF adapters, custom probe templates, scheduled re-validation, etc.) — see Manifest
 
 ## Files Changed

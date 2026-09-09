@@ -86,17 +86,51 @@ Key invariants: central `status_mapper`, central `redaction`, `request_policy` b
 
 ## Packaging
 
-After verifying `ruff check .` and `pytest`:
+After verifying `ruff check .` and `pytest` (138 tests):
 
 ```bash
-# Windows (first target)
-pyinstaller --windowed --name Raven-Validator app.py
-# → dist/Raven-Validator/Raven-Validator.exe
+# Development — always runnable as:
+python app.py
 
-# Later: macOS .app, Linux AppImage
+# ── Linux (this host, Debian 13) — tested 2026-09-09 ──
+# Requires: pip install pyinstaller
+# The src-layout needs --paths src; collect-all ensures pydantic/sqlalchemy/httpx/keyring
+pyinstaller --windowed --name Raven-Validator --paths src \
+  --collect-all pydantic --collect-all pydantic-settings \
+  --collect-all sqlalchemy --collect-all httpx --collect-all tenacity --collect-all keyring \
+  --hidden-import raven_validator --hidden-import raven_validator.gui.main_window \
+  --noconfirm app.py
+# → dist/Raven-Validator/ (directory, ~221 MB with PySide6)
+# → binary: dist/Raven-Validator/Raven-Validator  (ELF 64-bit, tested QT_QPA_PLATFORM=offscreen)
+dist/Raven-Validator/Raven-Validator  # launch (needs display; use offscreen for CI)
+
+# Single-file variant (optional):
+# pyinstaller --windowed --onefile --name Raven-Validator --paths src ... app.py
+# → dist/Raven-Validator (single ~120 MB binary)
+
+# ── Windows (first target, must build on Windows) ──
+# On a Windows host with Python 3.12+:
+#   pip install -e ".[dev]" && pip install pyinstaller
+#   pyinstaller --windowed --name Raven-Validator --paths src --collect-all pydantic --collect-all pydantic-settings --collect-all sqlalchemy --collect-all httpx --collect-all tenacity --collect-all keyring --hidden-import raven_validator --noconfirm app.py
+# → dist\Raven-Validator\Raven-Validator.exe  (directory build)
+# For a single EXE: add --onefile
+# Icon: add --icon assets/app_icon.ico  (and --icon assets/app_icon.icns for macOS)
+
+# ── macOS ──
+# Same as Windows, plus --icon assets/app_icon.icns
+# → dist/Raven-Validator.app  (bundle)
+# For distribution, create DMG:  hdiutil create -volname Raven-Validator -srcfolder dist/Raven-Validator.app -ov dist/Raven-Validator.dmg
+
+# ── Linux AppImage (later) ──
+# Use linuxdeploy or appimage-builder on top of the dist/Raven-Validator directory.
 ```
 
-During development always run via `python app.py`.
+Notes:
+- `build/` and `dist/` are gitignored — never commit them.
+- The checked-in `Raven-Validator.spec` is the generated spec for the Linux directory build (tune `datas/binaries/hiddenimports` there for custom builds).
+- `data/` and `exports/` are created at runtime; the packaged app writes to the same relative paths (or `RAVEN_VALIDATOR_DB_URL`).
+
+During development always prefer `python app.py` over the packaged binary.
 
 ## License
 
