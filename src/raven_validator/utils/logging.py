@@ -9,10 +9,10 @@ import re
 
 # Patterns matched case-insensitively and replaced with [REDACTED].
 _REDACT_PATTERNS = [
-    re.compile(r"(authorization\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE),
-    re.compile(r"(bearer\s+)([A-Za-z0-9\-._~+/=]+)", re.IGNORECASE),
-    re.compile(r"((?:x-api-key|api-key|apikey)\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE),
-    re.compile(r"((?:cookie|session|token)\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE),
+    re.compile(r"(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+", re.IGNORECASE),
+    re.compile(r"(bearer\s+)[A-Za-z0-9\-._~+/=]+", re.IGNORECASE),
+    re.compile(r"((?:x-api-key|api-key|apikey)\s*[:=]\s*)[^\s,;]+", re.IGNORECASE),
+    re.compile(r"((?:cookie|session|token)\s*[:=]\s*)[^\s,;]+", re.IGNORECASE),
 ]
 
 
@@ -20,7 +20,11 @@ def redact_message(message: str) -> str:
     """Mask credential-like values in a log message."""
     redacted = message
     for pattern in _REDACT_PATTERNS:
-        redacted = pattern.sub(r"\1[REDACTED]", redacted)
+        # Patterns with a capture group keep the prefix; bare patterns replace entirely.
+        if pattern.groups >= 1:
+            redacted = pattern.sub(r"\1[REDACTED]", redacted)
+        else:
+            redacted = pattern.sub("[REDACTED]", redacted)
     return redacted
 
 

@@ -2,17 +2,18 @@
 
 ## Current Milestone
 
-Milestone 3 — Protocol Adapters (complete, pending commit)
+Milestone 4 — Authorized Credentials (complete, pending commit)
 
 ## Completed
 
 - M0 Bootstrap (committed 94805ba)
 - M1 Domain & Security Foundation (committed e6bf009)
 - M2 Networking & Public Probes (committed 1ce51be)
-- M3.1 Adapter base contract + protocol detector (DetectionResult, adapter Protocol, detect_protocol)
-- M3.2 Protocol adapters (OpenAI /v1/models shape, Anthropic /v1/messages + x-api-key, Generic REST safe-only)
-- M3.3 Capability detector (independent per-route, OpenAPI path augmentation)
-- M3.4 Verification (ruff clean, 87/87 pytest pass)
+- M3 Protocol Adapters (committed ef810ed)
+- M4.1 Keychain backend (KeychainBackend with memory fallback, SHA-256 fingerprint ••••••••XXXX)
+- M4.2 Credential profiles (CredentialProfileRecord metadata-only, CredentialProfileStore)
+- M4.3 Credential manager (bearer/api-key/basic/custom header injection, redacted logging)
+- M4.4 Security tests (17 new tests: auth_detector + credential_security; 104 total pass)
 
 ## In Progress
 
@@ -20,7 +21,7 @@ Milestone 3 — Protocol Adapters (complete, pending commit)
 
 ## Next
 
-- Milestone 4 — Authorized Credentials
+- Milestone 5 — Functional Probes
 
 ## Files Changed
 
@@ -40,6 +41,7 @@ Milestone 3 — Protocol Adapters (complete, pending commit)
 - `pytest -v` (M1) → 37 passed (settings, url_normalizer, redaction, request_policy, status_mapper)
 - `pytest` (M2) → 74 passed (added reachability/auth/openapi mocked suite + HTTP mapping)
 - `pytest` (M3) → 87 passed (added protocol/openai/anthropic adapter tests)
+- `pytest` (M4) → 104 passed (added auth_detector + credential_security: no secret in SQLite/logs/export)
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 
 ## Known Issues
