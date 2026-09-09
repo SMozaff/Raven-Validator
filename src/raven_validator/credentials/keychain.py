@@ -28,21 +28,21 @@ class OSKeychain:
         kr = self._keyring()
         try:
             kr.set_password(service, username, secret)
-        except kr.errors.KeyringError as exc:  # backend-specific errors
+        except Exception as exc:  # backend-specific errors
             raise KeychainError(str(exc)) from exc
 
     def get(self, service: str, username: str) -> str | None:
         kr = self._keyring()
         try:
             return kr.get_password(service, username)
-        except kr.errors.KeyringError as exc:
+        except Exception as exc:
             raise KeychainError(str(exc)) from exc
 
     def delete(self, service: str, username: str) -> None:
         kr = self._keyring()
         try:
             kr.delete_password(service, username)
-        except kr.errors.KeyringError:
+        except Exception:
             # Deleting a missing key is idempotent for our UI.
             return
 

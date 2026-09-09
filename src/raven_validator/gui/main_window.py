@@ -4,44 +4,22 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-import pydantic
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFileDialog,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QMainWindow,
-    QMessageBox,
-    QPushButton,
-    QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMainWindow,
+    QMessageBox, QPushButton, QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
-from sqlalchemy.exc import SQLAlchemyError
 
 from raven_validator.config.settings import AppSettings
-from raven_validator.credentials.keychain import KeychainError, OSKeychain, fingerprint
+from raven_validator.credentials.keychain import OSKeychain, fingerprint, KeychainError
 from raven_validator.credentials.manager import CredentialManager
 from raven_validator.database.database import Database
 from raven_validator.domain.candidates import APICandidate
 from raven_validator.domain.credentials import AuthScheme, CredentialProfile
 from raven_validator.services.import_service import ImportService
-from raven_validator.services.validation_service import (
-    BatchEvent,
-    ValidationOptions,
-    ValidationService,
-)
+from raven_validator.services.validation_service import BatchEvent, ValidationOptions, ValidationService
 
 
 class CandidateDialog(QDialog):
@@ -92,8 +70,7 @@ class ValidationWorker(QObject):
         async def go():
             async for e in self.service.validate_batch(self.candidates, self.options): self.event.emit(e)
         try: asyncio.run(go())
-        except Exception as exc:  # noqa: BLE001 - worker-thread boundary; any failure must reach the UI, not kill the QThread silently
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+        except Exception as exc: self.failed.emit(f"{type(exc).__name__}: {exc}")
         finally: self.finished.emit()
     @Slot()
     def cancel(self) -> None: self.service.cancel()
@@ -168,7 +145,7 @@ class MainWindow(QMainWindow):
         d=CandidateDialog(self.db,parent=self)
         if d.exec()==QDialog.Accepted:
             try: c=d.value(); self.db.save_candidate(c); self.refresh_candidates()
-            except (pydantic.ValidationError, SQLAlchemyError) as exc: QMessageBox.warning(self,"Invalid candidate",str(exc))
+            except Exception as exc: QMessageBox.warning(self,"Invalid candidate",str(exc))
 
     def edit_candidate(self):
         c=self._selected_candidate()
@@ -176,7 +153,7 @@ class MainWindow(QMainWindow):
         d=CandidateDialog(self.db,c,self)
         if d.exec()==QDialog.Accepted:
             try: self.db.save_candidate(d.value()); self.refresh_candidates()
-            except (pydantic.ValidationError, SQLAlchemyError) as exc: QMessageBox.warning(self,"Invalid candidate",str(exc))
+            except Exception as exc: QMessageBox.warning(self,"Invalid candidate",str(exc))
 
     def delete_candidate(self):
         c=self._selected_candidate()

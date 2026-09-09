@@ -1,19 +1,173 @@
-name: CI
+name: Test and Build Desktop Apps
+
 on:
   push:
+    branches: ["**"]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: raven-validator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  QT_QPA_PLATFORM: offscreen
+
 jobs:
-  test:
+  quality:
+    name: Lint, tests, and compile
     runs-on: ubuntu-latest
-    env:
-      QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-      - run: pip install -e '.[dev]'
-      - run: ruff check .
-      - run: pytest
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Pytest
+        run: python -m pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q src app.py
+
+  desktop-build:
+    name: Build ${{ matrix.label }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux
+            artifact: Raven-Validator-Linux
+            package: Raven-Validator-linux.tar.gz
+          - os: windows-latest
+            label: Windows
+            artifact: Raven-Validator-Windows
+            package: Raven-Validator-windows.zip
+          - os: macos-14
+            label: macOS
+            artifact: Raven-Validator-macOS
+            package: Raven-Validator-macos.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,packaging]"
+
+      - name: Ruff on target OS
+        run: python -m ruff check .
+
+      - name: Tests on target OS
+        run: python -m pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q src app.py
+
+      - name: Build Linux executable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: >-
+          python -m PyInstaller --noconfirm --clean --windowed --onefile
+          --name Raven-Validator --paths src
+          --collect-all keyring
+          --collect-all pydantic
+          --collect-all pydantic_settings
+          --hidden-import raven_validator
+          --hidden-import raven_validator.gui.main_window
+          app.py
+
+      - name: Verify Linux executable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: test -f dist/Raven-Validator
+
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python -m PyInstaller --noconfirm --clean --windowed --onefile
+          --name Raven-Validator --paths src
+          --collect-all keyring
+          --collect-all pydantic
+          --collect-all pydantic_settings
+          --hidden-import raven_validator
+          --hidden-import raven_validator.gui.main_window
+          app.py
+
+      - name: Verify Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\Raven-Validator.exe")) {
+            throw "Windows executable was not produced"
+          }
+
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: >-
+          python -m PyInstaller --noconfirm --clean --windowed
+          --name Raven-Validator --paths src
+          --collect-all keyring
+          --collect-all pydantic
+          --collect-all pydantic_settings
+          --hidden-import raven_validator
+          --hidden-import raven_validator.gui.main_window
+          app.py
+
+      - name: Verify macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test -d dist/Raven-Validator.app
+
+      - name: Package Linux artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        run: tar -czf "${{ matrix.package }}" -C dist Raven-Validator
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist\Raven-Validator.exe" -DestinationPath "${{ matrix.package }}" -Force
+
+      - name: Package macOS artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Raven-Validator.app "${{ matrix.package }}"
+
+      - name: Upload desktop build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ runner.arch }}
+          path: ${{ matrix.package }}
+          if-no-files-found: error
+          retention-days: 14

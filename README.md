@@ -116,3 +116,14 @@ ruff check .
 ```
 
 The unit suite uses `httpx.MockTransport`; it does not call third-party APIs or use real credentials.
+
+
+## Desktop CI builds
+
+`.github/workflows/ci.yml` runs lint/tests/compile checks and then builds native PyInstaller artifacts on:
+
+- Linux
+- Windows
+- macOS
+
+Each successful platform build is uploaded to the GitHub Actions run as an artifact.

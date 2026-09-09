@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-
 from raven_validator.domain.results import ValidationResult
 
 

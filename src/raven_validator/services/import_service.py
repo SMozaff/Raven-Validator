@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import pydantic
-
 from raven_validator.domain.candidates import APICandidate
 
 
@@ -37,7 +35,7 @@ def _candidate(raw: dict[str, Any]) -> APICandidate | None:
             source_type=str(raw.get("source_type") or "").strip() or None,
             notes=str(raw.get("notes") or "").strip() or None,
         )
-    except pydantic.ValidationError:
+    except Exception:
         return None
 
 
@@ -46,7 +44,7 @@ class ImportService:
         result = ImportResult()
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except Exception as exc:
             result.errors.append(f"Failed to read JSON: {exc}")
             return result
         if not isinstance(payload, dict) or payload.get("schema") != "raven-discovery-export-v1":
@@ -93,7 +91,7 @@ class ImportService:
         result = ImportResult()
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except Exception as exc:
             result.errors.append(str(exc)); return result
         if isinstance(payload, dict) and payload.get("schema") == "raven-discovery-export-v1":
             return self.import_raven_targeter(path)
@@ -111,7 +109,7 @@ class ImportService:
         try:
             with Path(path).open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-        except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        except Exception as exc:
             result.errors.append(str(exc)); return result
         for i, row in enumerate(rows):
             cand = _candidate(row)
