@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 7 — GUI Shell (complete, pending commit)
+Milestone 8 — End-to-End Validation (complete, pending commit)
 
 ## Completed
 
@@ -13,14 +13,10 @@ Milestone 7 — GUI Shell (complete, pending commit)
 - M4 Authorized Credentials (committed 366835a)
 - M5 Functional Probes (committed 1b7832d)
 - M6 Persistence (committed b1661a5)
-- M7.1 MainWindow with Database injection, auto-refresh on navigation, dispose on close
-- M7.2 Dashboard — live stats from DB (Total/Working/Auth Required/Rate Limited/Insufficient/Offline/Unknown/Last Validation)
-- M7.3 Candidates — QTableWidget with add/edit/delete, import placeholders, validate hooks, URL validation, empty state
-- M7.4 Validator — depth (Quick/Standard/Authorized/Custom), concurrency, timeout, streaming/quota/rate-limit toggles (quota & streaming visibly optional), progress + start/cancel
-- M7.5 Results — runs table with 13 columns, status handling, double-click detail; ResultDetail dialog with Summary/Connectivity/Capabilities/Models/RateLimits/Quota/Errors/Evidence (redacted)
-- M7.6 Credentials — profile CRUD (add/edit/replace/delete), fingerprint display (••••••••XXXX), memory keychain fallback
-- M7.7 Settings — DB URL, log level, timeouts, concurrency, max requests per API, default depth (session-only save)
-- M7.8 Verification (ruff clean, 127/127 pytest pass, GUI smoke: nav + candidates + dashboard + persistence OK, no detached instance)
+- M7 GUI Shell (committed c003846)
+- M8.1 ValidationService — mode-aware probe pipeline (Quick/Standard/Authorized+streaming/quota), protocol detection, capability merge, rate-limit/quota/status mapping, SQLite persistence of runs/snapshots/probe results/errors
+- M8.2 GUI wiring — ValidationWorker (QObject+asyncio loop) in QThread, batch_event Signal, progress bar, START/CANCEL, progressive results via MainWindow batch_event→Results/Dashboard refresh, no network on main thread
+- M8.3 Verification (ruff clean, 131/131 pytest pass; batch 10/partial/progress/cancellation; E2E quick/standard/authorized smoke with persistence)
 
 ## In Progress
 
@@ -28,7 +24,7 @@ Milestone 7 — GUI Shell (complete, pending commit)
 
 ## Next
 
-- Milestone 8 — End-to-End Validation
+- Milestone 9 — Import / Export
 
 ## Files Changed
 
@@ -52,9 +48,12 @@ Milestone 7 — GUI Shell (complete, pending commit)
 - `pytest` (M5) → 121 passed (added models/generation/streaming/rate_limit/quota probes)
 - `pytest` (M6) → 127 passed (schema, candidate/run/probe/snapshot/credential CRUD; no secret in DB; persistence across restarts)
 - `pytest` (M7) → 127 passed (no new tests; GUI verified via offscreen smoke)
+- `pytest` (M8) → 131 passed (added batch 10/partial/progress/cancellation + E2E service)
 - GUI smoke (M7) → MainWindow 6 nav items, dashboard stats live from DB, candidates CRUD, validator toggles, results table, credentials fingerprint — no network on main thread, no detached instance
+- GUI smoke (M8) → QThread ValidationWorker, batch_event→progressive Results/Dashboard refresh, CANCEL preserves partial results
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 - M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
+- E2E smoke (M8) → quick/standard/authorized modes with openai-compatible detection, model snapshot + rate-limit persistence
 
 ## Known Issues
 

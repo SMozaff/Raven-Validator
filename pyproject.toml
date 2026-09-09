@@ -50,6 +50,7 @@ select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
 "tests/*.py" = ["E501"]
 "src/raven_validator/database/*.py" = ["E501"]
 "src/raven_validator/gui/*.py" = ["E501", "SIM105"]
+"src/raven_validator/services/*.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["raven_validator"]

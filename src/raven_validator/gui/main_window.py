@@ -60,6 +60,14 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(page)
         layout.addWidget(self.stack, stretch=1)
 
+        # Progressive updates: validator -> results/dashboard refresh.
+        validator_page = self.pages[2]
+        results_page = self.pages[3]
+        dashboard_page = self.pages[0]
+        if hasattr(validator_page, "batch_event"):
+            validator_page.batch_event.connect(lambda e: results_page.refresh())  # type: ignore[attr-defined]
+            validator_page.batch_event.connect(lambda e: dashboard_page.refresh())  # type: ignore[attr-defined]
+
         self.nav.setCurrentRow(0)
         self.statusBar().showMessage("Ready")
 
