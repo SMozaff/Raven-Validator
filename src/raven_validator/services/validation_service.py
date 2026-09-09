@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
-from typing import AsyncGenerator, Callable
 from uuid import UUID, uuid4
 
 import httpx
@@ -17,11 +17,20 @@ from raven_validator.core.protocol_detector import detect_protocol
 from raven_validator.core.status_mapper import transport_status
 from raven_validator.domain.candidates import APICandidate
 from raven_validator.domain.credentials import CredentialProfile
-from raven_validator.domain.results import QuotaInfo, RateLimitInfo, ValidationError, ValidationResult
+from raven_validator.domain.results import (
+    QuotaInfo,
+    RateLimitInfo,
+    ValidationError,
+    ValidationResult,
+)
 from raven_validator.domain.statuses import ValidationStatus
 from raven_validator.security.network_policy import NetworkPolicy, UnsafeNetworkTarget
 from raven_validator.security.redaction import redact_text
-from raven_validator.security.request_policy import ProbeSafetyLevel, RequestBudgetExceeded, RequestPolicy
+from raven_validator.security.request_policy import (
+    ProbeSafetyLevel,
+    RequestBudgetExceeded,
+    RequestPolicy,
+)
 
 CredentialResolver = Callable[[APICandidate], tuple[CredentialProfile, str] | None]
 
@@ -293,7 +302,7 @@ class ValidationService:
                     result = task.result()
                 except asyncio.CancelledError:
                     continue
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - isolate a single candidate's failure so it doesn't abort the batch
                     result = ValidationResult(
                         candidate_id=c.id, run_id=uuid4(), base_url=str(c.base_url),
                         overall_status=ValidationStatus.UNKNOWN,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+
 from raven_validator.credentials.keychain import OSKeychain, SecretBackend
 from raven_validator.domain.credentials import AuthScheme, CredentialProfile
 

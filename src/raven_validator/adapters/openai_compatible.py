@@ -1,12 +1,16 @@
 """OpenAI-compatible adapter."""
 from __future__ import annotations
 
-import json
 import time
 
 import httpx
 
-from raven_validator.adapters.base import AuthorizedContext, DetectionResult, ProbeOutcome, PublicContext
+from raven_validator.adapters.base import (
+    AuthorizedContext,
+    DetectionResult,
+    ProbeOutcome,
+    PublicContext,
+)
 from raven_validator.security.redaction import redact_text
 
 
@@ -59,7 +63,7 @@ class OpenAICompatibleAdapter:
         started = time.perf_counter()
         try:
             r = await client.get(url, headers=headers or None)
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return ProbeOutcome("models", False, error=f"{type(exc).__name__}: {exc}")
         latency = (time.perf_counter() - started) * 1000
         models: list[str] = []
@@ -79,7 +83,7 @@ class OpenAICompatibleAdapter:
         started = time.perf_counter()
         try:
             r = await ctx.client.post(url, json=payload, headers=ctx.auth_headers)
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return ProbeOutcome("generation", False, error=f"{type(exc).__name__}: {exc}")
         latency = (time.perf_counter() - started) * 1000
         data = {"model": model, "excerpt": redact_text(r.text, 500), "headers": dict(r.headers)}
@@ -99,7 +103,7 @@ class OpenAICompatibleAdapter:
         started = time.perf_counter()
         try:
             r = await ctx.client.post(url, json=payload, headers=ctx.auth_headers)
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return ProbeOutcome("streaming", False, error=f"{type(exc).__name__}: {exc}")
         latency = (time.perf_counter() - started) * 1000
         ctype = r.headers.get("content-type", "")
@@ -113,7 +117,7 @@ class OpenAICompatibleAdapter:
             return ProbeOutcome("quota", False, data={"status": "UNSUPPORTED", "known": False, "reason": "No documented quota endpoint configured"})
         try:
             r = await ctx.client.get(endpoint, headers=ctx.auth_headers)
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             return ProbeOutcome("quota", False, error=f"{type(exc).__name__}: {exc}")
         if r.status_code == 429:
             return ProbeOutcome("quota", False, 429, data={"status": "UNKNOWN", "known": False, "reason": "Rate limited; credit balance not inferred"})

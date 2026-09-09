@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from uuid import UUID
+
 from pydantic import BaseModel, Field
+
 from raven_validator.domain.statuses import ValidationStatus
 
 

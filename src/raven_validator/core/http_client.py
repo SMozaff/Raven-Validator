@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 import httpx
 
 from raven_validator.security.network_policy import NetworkPolicy

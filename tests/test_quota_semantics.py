@@ -1,11 +1,13 @@
 import httpx
 import pytest
+
 from raven_validator.adapters.base import AuthorizedContext
 from raven_validator.adapters.openai_compatible import OpenAICompatibleAdapter
 from raven_validator.core.http_client import BudgetedSafeClient
 from raven_validator.domain.candidates import APICandidate
 from raven_validator.security.network_policy import NetworkPolicy
-from raven_validator.security.request_policy import RequestPolicy, ProbeSafetyLevel
+from raven_validator.security.request_policy import ProbeSafetyLevel, RequestPolicy
+
 
 @pytest.mark.asyncio
 async def test_429_quota_does_not_invent_zero_balance():
