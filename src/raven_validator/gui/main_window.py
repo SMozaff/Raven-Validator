@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from raven_validator.config.settings import AppSettings
+from raven_validator.database.database import Database
 from raven_validator.gui.candidates_page import CandidatesPage
 from raven_validator.gui.credentials_page import CredentialsPage
 from raven_validator.gui.dashboard import DashboardPage
@@ -32,6 +33,7 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
         self.settings = settings
+        self.database = Database(settings.db_url)
         self.setWindowTitle("Raven-Validator")
         self.resize(1100, 700)
 
@@ -46,12 +48,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.nav)
 
         self.stack = QStackedWidget()
-        self.pages = [
-            DashboardPage(settings),
-            CandidatesPage(settings),
-            ValidatorPage(settings),
-            ResultsPage(settings),
-            CredentialsPage(settings),
+        self.pages: list[QWidget] = [
+            DashboardPage(settings, self.database),
+            CandidatesPage(settings, self.database),
+            ValidatorPage(settings, self.database),
+            ResultsPage(settings, self.database),
+            CredentialsPage(settings, self.database),
             SettingsPage(settings),
         ]
         for page in self.pages:
@@ -63,3 +65,11 @@ class MainWindow(QMainWindow):
 
     def _on_nav_changed(self, row: int) -> None:
         self.stack.setCurrentIndex(row)
+        # Refresh pages when navigated to (lightweight).
+        page = self.stack.widget(row)
+        if hasattr(page, "refresh"):
+            page.refresh()  # type: ignore[operator]
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self.database.dispose()
+        super().closeEvent(event)

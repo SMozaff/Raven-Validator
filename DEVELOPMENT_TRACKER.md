@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 6 — Persistence (complete, pending commit)
+Milestone 7 — GUI Shell (complete, pending commit)
 
 ## Completed
 
@@ -12,9 +12,15 @@ Milestone 6 — Persistence (complete, pending commit)
 - M3 Protocol Adapters (committed ef810ed)
 - M4 Authorized Credentials (committed 366835a)
 - M5 Functional Probes (committed 1b7832d)
-- M6.1 SQLAlchemy ORM (9 tables: api_candidates, validation_runs, probe_results, capability/model/rate_limit/quota_snapshots, credential_profiles, validation_errors; auto-create on first run)
-- M6.2 Database + Repository (engine, session context, candidate/run/probe/snapshot/error/credential-profile CRUD with redaction, save_validation_result convenience)
-- M6.3 Verification (ruff clean, 127/127 pytest pass; no secret in DB; history persists across restarts)
+- M6 Persistence (committed b1661a5)
+- M7.1 MainWindow with Database injection, auto-refresh on navigation, dispose on close
+- M7.2 Dashboard — live stats from DB (Total/Working/Auth Required/Rate Limited/Insufficient/Offline/Unknown/Last Validation)
+- M7.3 Candidates — QTableWidget with add/edit/delete, import placeholders, validate hooks, URL validation, empty state
+- M7.4 Validator — depth (Quick/Standard/Authorized/Custom), concurrency, timeout, streaming/quota/rate-limit toggles (quota & streaming visibly optional), progress + start/cancel
+- M7.5 Results — runs table with 13 columns, status handling, double-click detail; ResultDetail dialog with Summary/Connectivity/Capabilities/Models/RateLimits/Quota/Errors/Evidence (redacted)
+- M7.6 Credentials — profile CRUD (add/edit/replace/delete), fingerprint display (••••••••XXXX), memory keychain fallback
+- M7.7 Settings — DB URL, log level, timeouts, concurrency, max requests per API, default depth (session-only save)
+- M7.8 Verification (ruff clean, 127/127 pytest pass, GUI smoke: nav + candidates + dashboard + persistence OK, no detached instance)
 
 ## In Progress
 
@@ -22,7 +28,7 @@ Milestone 6 — Persistence (complete, pending commit)
 
 ## Next
 
-- Milestone 7 — GUI Shell
+- Milestone 8 — End-to-End Validation
 
 ## Files Changed
 
@@ -45,6 +51,8 @@ Milestone 6 — Persistence (complete, pending commit)
 - `pytest` (M4) → 104 passed (added auth_detector + credential_security: no secret in SQLite/logs/export)
 - `pytest` (M5) → 121 passed (added models/generation/streaming/rate_limit/quota probes)
 - `pytest` (M6) → 127 passed (schema, candidate/run/probe/snapshot/credential CRUD; no secret in DB; persistence across restarts)
+- `pytest` (M7) → 127 passed (no new tests; GUI verified via offscreen smoke)
+- GUI smoke (M7) → MainWindow 6 nav items, dashboard stats live from DB, candidates CRUD, validator toggles, results table, credentials fingerprint — no network on main thread, no detached instance
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 - M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
 
