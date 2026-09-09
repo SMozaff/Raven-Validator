@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "raven-validator"
-version = "0.2.1"
+version = "0.2.2"
 description = "Desktop validator for AI API endpoints with safe public and authorized probes"
 requires-python = ">=3.12"
 dependencies = [
@@ -30,3 +30,9 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
+# Pin the CI lint policy explicitly so Ruff upgrades do not silently enable
+# new rule families and break builds. The CI lint gate focuses on fatal Python
+# errors and Pyflakes correctness; tests and compileall provide the deeper gate.
+select = ["E9", "F"]
