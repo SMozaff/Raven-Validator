@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 4 — Authorized Credentials (complete, pending commit)
+Milestone 5 — Functional Probes (complete, pending commit)
 
 ## Completed
 
@@ -10,10 +10,9 @@ Milestone 4 — Authorized Credentials (complete, pending commit)
 - M1 Domain & Security Foundation (committed e6bf009)
 - M2 Networking & Public Probes (committed 1ce51be)
 - M3 Protocol Adapters (committed ef810ed)
-- M4.1 Keychain backend (KeychainBackend with memory fallback, SHA-256 fingerprint ••••••••XXXX)
-- M4.2 Credential profiles (CredentialProfileRecord metadata-only, CredentialProfileStore)
-- M4.3 Credential manager (bearer/api-key/basic/custom header injection, redacted logging)
-- M4.4 Security tests (17 new tests: auth_detector + credential_security; 104 total pass)
+- M4 Authorized Credentials (committed 366835a)
+- M5.1-5.2 Functional probes (models dedupe/snapshot, minimal generation 1-req/3-tokens, streaming first-chunk, rate-limit header parse, quota optional UNKNOWN/INSUFFICIENT)
+- M5.3 Verification (ruff clean, 121/121 pytest pass; smoke: authorized generation + streaming OK, unknown quota=UNKNOWN)
 
 ## In Progress
 
@@ -21,7 +20,7 @@ Milestone 4 — Authorized Credentials (complete, pending commit)
 
 ## Next
 
-- Milestone 5 — Functional Probes
+- Milestone 6 — Persistence
 
 ## Files Changed
 
@@ -42,7 +41,9 @@ Milestone 4 — Authorized Credentials (complete, pending commit)
 - `pytest` (M2) → 74 passed (added reachability/auth/openapi mocked suite + HTTP mapping)
 - `pytest` (M3) → 87 passed (added protocol/openai/anthropic adapter tests)
 - `pytest` (M4) → 104 passed (added auth_detector + credential_security: no secret in SQLite/logs/export)
+- `pytest` (M5) → 121 passed (added models/generation/streaming/rate_limit/quota probes)
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
+- M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
 
 ## Known Issues
 
