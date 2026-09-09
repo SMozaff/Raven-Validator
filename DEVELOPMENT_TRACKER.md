@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 9 — Import / Export (complete, pending commit)
+Milestone 10 — Polish & Release Candidate (complete, pending commit)
 
 ## Completed
 
@@ -15,9 +15,10 @@ Milestone 9 — Import / Export (complete, pending commit)
 - M6 Persistence (committed b1661a5)
 - M7 GUI Shell (committed c003846)
 - M8 End-to-End Validation (committed 6eb46f9)
-- M9.1 ImportService — tolerant JSON/CSV/Raven-Targeter (raven-discovery-export-v1) mapper, per-row skip+error, multi-endpoint expansion, never fails whole batch
-- M9.2 ExportService — JSON/CSV from Repository (secret-free by construction), candidate-filtered, NOT_TESTED handling
-- M9.3 GUI wiring — Candidates import buttons → ImportService+Repository+refresh+summary; Results export buttons → ExportService+file dialog; 138/138 pytest pass with malformed-row + secret-absent tests
+- M9 Import / Export (committed 4156e8e)
+- M10.1 GUI polish — Results filtering (Search + status combo, filtered-empty hint) + sorting (QTableWidget), detail evidence (Summary/Connectivity/Protocol/Authentication/Probe Timeline/Capabilities/Models/Functional Test/Streaming/Rate Limits/Quota/Errors/Evidence; UserRole id storage surviving sort/filter), empty-state & error-message improvements
+- M10.2 Documentation — README (quickstart, architecture, features, packaging), CHANGELOG 1.0.0 RC, QWEN.md (V1 RC status, ValidationWorker→ValidationService→Engine signal chain)
+- M10.3 Verification (ruff clean, 138/138 pytest pass, security review PASS, offscreen GUI smoke: nav + import + validation run + detail + filter + export)
 
 ## In Progress
 
@@ -25,7 +26,7 @@ Milestone 9 — Import / Export (complete, pending commit)
 
 ## Next
 
-- Milestone 10 — Polish & Release Candidate
+- V1.1 (Gemini/Ollama/HF adapters, custom probe templates, scheduled re-validation, etc.) — see Manifest
 
 ## Files Changed
 
@@ -51,12 +52,15 @@ Milestone 9 — Import / Export (complete, pending commit)
 - `pytest` (M7) → 127 passed (no new tests; GUI verified via offscreen smoke)
 - `pytest` (M8) → 131 passed (added batch 10/partial/progress/cancellation + E2E service)
 - `pytest` (M9) → 138 passed (added JSON/CSV/Targeter imports, malformed-row tolerance, secret-absent exports)
+- `pytest` (M10) → 138 passed (no new tests; polish verified via GUI smoke)
 - GUI smoke (M7) → MainWindow 6 nav items, dashboard stats live from DB, candidates CRUD, validator toggles, results table, credentials fingerprint — no network on main thread, no detached instance
 - GUI smoke (M8) → QThread ValidationWorker, batch_event→progressive Results/Dashboard refresh, CANCEL preserves partial results
 - GUI smoke (M9) → JSON import (1 good/1 bad) → candidates table, JSON export round-trip
+- GUI smoke (M10) → Results filter (Search+status) + filtered-empty hint, sorting survives detail lookup via UserRole, detail shows Probe Timeline (latency/http/excerpt), auth evidence, functional/streaming/quota sections; .env not leaked
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 - M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
 - E2E smoke (M8) → quick/standard/authorized modes with openai-compatible detection, model snapshot + rate-limit persistence
+- Security review (M10) → PASS: no secret in logs (RedactionFilter), SQLite (model_dump_safe), exports (JSON/CSV), DetectedSecret metadata-only, RequestPolicy ceiling
 
 ## Known Issues
 
