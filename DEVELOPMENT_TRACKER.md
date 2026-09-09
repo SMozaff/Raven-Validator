@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 8 — End-to-End Validation (complete, pending commit)
+Milestone 9 — Import / Export (complete, pending commit)
 
 ## Completed
 
@@ -14,9 +14,10 @@ Milestone 8 — End-to-End Validation (complete, pending commit)
 - M5 Functional Probes (committed 1b7832d)
 - M6 Persistence (committed b1661a5)
 - M7 GUI Shell (committed c003846)
-- M8.1 ValidationService — mode-aware probe pipeline (Quick/Standard/Authorized+streaming/quota), protocol detection, capability merge, rate-limit/quota/status mapping, SQLite persistence of runs/snapshots/probe results/errors
-- M8.2 GUI wiring — ValidationWorker (QObject+asyncio loop) in QThread, batch_event Signal, progress bar, START/CANCEL, progressive results via MainWindow batch_event→Results/Dashboard refresh, no network on main thread
-- M8.3 Verification (ruff clean, 131/131 pytest pass; batch 10/partial/progress/cancellation; E2E quick/standard/authorized smoke with persistence)
+- M8 End-to-End Validation (committed 6eb46f9)
+- M9.1 ImportService — tolerant JSON/CSV/Raven-Targeter (raven-discovery-export-v1) mapper, per-row skip+error, multi-endpoint expansion, never fails whole batch
+- M9.2 ExportService — JSON/CSV from Repository (secret-free by construction), candidate-filtered, NOT_TESTED handling
+- M9.3 GUI wiring — Candidates import buttons → ImportService+Repository+refresh+summary; Results export buttons → ExportService+file dialog; 138/138 pytest pass with malformed-row + secret-absent tests
 
 ## In Progress
 
@@ -24,7 +25,7 @@ Milestone 8 — End-to-End Validation (complete, pending commit)
 
 ## Next
 
-- Milestone 9 — Import / Export
+- Milestone 10 — Polish & Release Candidate
 
 ## Files Changed
 
@@ -49,8 +50,10 @@ Milestone 8 — End-to-End Validation (complete, pending commit)
 - `pytest` (M6) → 127 passed (schema, candidate/run/probe/snapshot/credential CRUD; no secret in DB; persistence across restarts)
 - `pytest` (M7) → 127 passed (no new tests; GUI verified via offscreen smoke)
 - `pytest` (M8) → 131 passed (added batch 10/partial/progress/cancellation + E2E service)
+- `pytest` (M9) → 138 passed (added JSON/CSV/Targeter imports, malformed-row tolerance, secret-absent exports)
 - GUI smoke (M7) → MainWindow 6 nav items, dashboard stats live from DB, candidates CRUD, validator toggles, results table, credentials fingerprint — no network on main thread, no detached instance
 - GUI smoke (M8) → QThread ValidationWorker, batch_event→progressive Results/Dashboard refresh, CANCEL preserves partial results
+- GUI smoke (M9) → JSON import (1 good/1 bad) → candidates table, JSON export round-trip
 - Engine smoke test → REACHABLE_AUTH_REQUIRED with bearer evidence, confidence 0.95
 - M5 smoke → authorized generation + streaming + rate-limit parse + UNKNOWN quota (no failure collapse)
 - E2E smoke (M8) → quick/standard/authorized modes with openai-compatible detection, model snapshot + rate-limit persistence

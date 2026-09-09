@@ -210,11 +210,34 @@ class CandidatesPage(QWidget):
         self.refresh()
 
     def _on_import(self, kind: str) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, f"Import {kind}", "", "JSON (*.json);;CSV (*.csv);;All (*)" if kind != "targeter" else "JSON (*.json)")
+        filters = {"json": "JSON (*.json)", "csv": "CSV (*.csv)", "targeter": "JSON (*.json)"}[kind]
+        path, _ = QFileDialog.getOpenFileName(self, f"Import {kind}", "", f"{filters};;All (*)")
         if not path:
             return
-        # Defer to import service in M9 — show placeholder for now.
-        QMessageBox.information(self, "Import", f"Import ({kind}) will be available in Milestone 9.\nSelected: {path}")
+        from raven_validator.services.import_service import ImportService
+
+        svc = ImportService()
+        if kind == "json":
+            result = svc.import_json(path)
+        elif kind == "csv":
+            result = svc.import_csv(path)
+        else:
+            result = svc.import_raven_targeter(path)
+
+        # Persist imported candidates.
+        with self.database.session() as sess:
+            repo = Repository(sess)
+            for cand in result.candidates:
+                repo.save_candidate(cand)
+
+        self.refresh()
+        # Report summary.
+        summary = f"Imported: {result.imported}\nSkipped: {result.skipped}"
+        if result.errors:
+            summary += "\n\nErrors (first 5):\n" + "\n".join(result.errors[:5])
+            if len(result.errors) > 5:
+                summary += f"\n… and {len(result.errors) - 5} more"
+        QMessageBox.information(self, "Import Result", summary)
 
     def _on_validate(self) -> None:
         row = self.table.currentRow()

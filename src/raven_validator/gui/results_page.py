@@ -149,6 +149,23 @@ class ResultsPage(QWidget):
             dlg.exec()
 
     def _on_export(self, fmt: str) -> None:
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-        QMessageBox.information(self, "Export", f"Export ({fmt}) will be available in Milestone 9.")
+        filt = "JSON (*.json)" if fmt == "json" else "CSV (*.csv)"
+        path, _ = QFileDialog.getSaveFileName(self, f"Export {fmt.upper()}", f"raven_validator_export.{fmt}", filt)
+        if not path:
+            return
+        from raven_validator.database.repository import Repository
+        from raven_validator.services.export_service import ExportService
+
+        with self.database.session() as sess:
+            repo = Repository(sess)
+            svc = ExportService()
+            try:
+                if fmt == "json":
+                    out = svc.export_json(repo, path)
+                else:
+                    out = svc.export_csv(repo, path)
+                QMessageBox.information(self, "Export", f"Exported to:\n{out}")
+            except OSError as exc:
+                QMessageBox.warning(self, "Export Failed", str(exc))
